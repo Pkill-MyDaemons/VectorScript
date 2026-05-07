@@ -1,0 +1,3 @@
+/Users/henry/Developer/VectorScript/VectorScript/build/CMakeFiles/VectorScriptFirmware.dir
+/Users/henry/Developer/VectorScript/VectorScript/build/CMakeFiles/edit_cache.dir
+/Users/henry/Developer/VectorScript/VectorScript/build/CMakeFiles/rebuild_cache.dir
