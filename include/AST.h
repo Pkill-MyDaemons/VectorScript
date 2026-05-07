@@ -3,13 +3,25 @@
 #include <vector>
 #include <memory>
 #include <sstream>
+#include <VESState.h>
 
-// 1. Style Structure
+// --- HELPER: String Splitter for Gradients ---
+inline std::vector<std::string> splitString(const std::string& s, char delim) {
+    std::vector<std::string> result;
+    std::stringstream ss(s);
+    std::string item;
+    while (getline(ss, item, delim)) result.push_back(item);
+    return result;
+}
+
+// 1. Updated Style Structure
 struct VESStyle {
     std::string fill = "none";
+    std::string gradient = ""; // NEW: E.g., "#FF0000,#00FF00"
     int fontSize = 16;
     std::string onClick = ""; 
     std::string align = "left"; 
+    float spacing = 10;        // NEW: Gap between Stack items
 };
 
 inline std::string sanitizeXML(const std::string& input) {
@@ -36,6 +48,9 @@ public:
     virtual bool contains(float px, float py) const = 0;
     virtual std::string getOnClick() const = 0;
     virtual std::string getId() const = 0;
+    
+    // NEW: Allows Layout Engines to move elements dynamically!
+    virtual void shift(float dx, float dy) = 0; 
 };
 
 // 3. Text Element (Moved up so Box can see it)
@@ -45,41 +60,39 @@ private:
     std::string id;
     float x, y;
     std::string content;
+    std::string binding; // NEW: Holds "utils.Time"
     VESStyle style;
     std::string anchor = "start";
 
 public:
-    TextNode(std::string id, float x, float y, std::string text, VESStyle s)
-        : id(std::move(id)), x(x), y(y), content(std::move(text)), style(std::move(s)) {}
+    // Notice the new 'binding' parameter
+    TextNode(std::string id, float x, float y, std::string text, std::string bind, VESStyle s)
+        : id(std::move(id)), x(x), y(y), content(std::move(text)), binding(std::move(bind)), style(std::move(s)) {}
 
-    void setX(float nx) { x = nx; }
-    void setY(float ny) { y = ny; }
-    void setAnchor(std::string a) { anchor = std::move(a); }
-    
-    // --- NEW: State Mutators ---
-    std::string getContent() const { return content; }
-    void setContent(std::string newText) { content = std::move(newText); }
-
-    std::string getId() const override { return id; }
-    
-    std::string getOnClick() const override { return style.onClick; }
-    bool contains(float px, float py) const override { return false; } 
+    // ... keeping setters and shift the same ...
 
     std::string asSVG() const override {
+        // DATA BINDING MAGIC!
+        std::string displayText = content;
+        if (!binding.empty() && VESState::values.count(binding)) {
+            displayText = VESState::values[binding];
+        }
+
         std::ostringstream svg;
         svg << "  <text id=\"" << id << "\" x=\"" << x << "\" y=\"" << y 
             << "\" fill=\"" << style.fill << "\" font-size=\"" << style.fontSize 
             << "\" font-family=\"sans-serif\" text-anchor=\"" << anchor 
             << "\" dominant-baseline=\"central\">" 
-            << sanitizeXML(content)
+            << sanitizeXML(displayText) 
             << "</text>\n";
         return svg.str();
     }
 };
 
 // 4. Box Element (The Container)
+// 4. Box Element (Now with Gradients!)
 class BoxNode : public ASTNode {
-private:
+protected:
     std::string id;
     float x, y, width, height;
     VESStyle style;
@@ -89,8 +102,8 @@ public:
     BoxNode(std::string id, float x, float y, float w, float h, VESStyle s)
         : id(std::move(id)), x(x), y(y), width(w), height(h), style(std::move(s)) {}
 
-    // When a child is added, the Box positions it automatically!
-    void addChild(std::shared_ptr<ASTNode> child) {
+    // Notice the 'virtual' keyword! This lets Stacks override it.
+    virtual void addChild(std::shared_ptr<ASTNode> child) {
         if (auto textChild = std::dynamic_pointer_cast<TextNode>(child)) {
             if (style.align == "center") {
                 textChild->setX(x + width / 2.0f);
@@ -98,37 +111,80 @@ public:
                 textChild->setAnchor("middle");
             } else {
                 textChild->setX(x + 10);
-                textChild->setY(y + 20); // Default padding
+                textChild->setY(y + 20);
                 textChild->setAnchor("start");
             }
         }
         children.push_back(child);
     }
 
+    void shift(float dx, float dy) override {
+        x += dx; y += dy;
+        for (auto& child : children) child->shift(dx, dy); 
+    }
+
     const std::vector<std::shared_ptr<ASTNode>>& getChildren() const { return children; }
     std::string getId() const override { return id; }
     std::string getOnClick() const override { return style.onClick; }
-    
-    bool contains(float px, float py) const override {
-        return (px >= x && px <= x + width && py >= y && py <= y + height);
-    }
+    bool contains(float px, float py) const override { return (px >= x && px <= x + width && py >= y && py <= y + height); }
 
     std::string asSVG() const override {
         std::ostringstream svg;
-        // Draw the Box with rounded corners again!
+        std::string fillAttr = style.fill;
+
+        if (!style.gradient.empty()) {
+            auto colors = splitString(style.gradient, ',');
+            std::string gradId = "grad_" + id;
+            fillAttr = "url(#" + gradId + ")";
+            
+            svg << "  <defs>\n    <linearGradient id=\"" << gradId << "\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"100%\">\n";
+            for (size_t i = 0; i < colors.size(); ++i) {
+                float offset = (float)i / (colors.size() - 1) * 100.0f;
+                svg << "      <stop offset=\"" << offset << "%\" stop-color=\"" << colors[i] << "\" />\n";
+            }
+            svg << "    </linearGradient>\n  </defs>\n";
+        }
+
         svg << "  <rect id=\"" << id << "\" x=\"" << x << "\" y=\"" << y 
             << "\" width=\"" << width << "\" height=\"" << height 
-            << "\" fill=\"" << style.fill << "\" rx=\"8\" />\n";
+            << "\" fill=\"" << fillAttr << "\" rx=\"8\" />\n";
         
-        // Draw the Children!
-        for (const auto& child : children) {
-            svg << child->asSVG();
-        }
+        for (const auto& child : children) svg << child->asSVG();
         return svg.str();
     }
 };
 
-// 5. Circle Element
+// 5. Vertical Stack (Auto-Layout!)
+class VStackNode : public BoxNode {
+private:
+    float currentYOffset;
+public:
+    VStackNode(std::string id, float x, float y, float w, float h, VESStyle s)
+        : BoxNode(id, x, y, w, h, s), currentYOffset(y + s.spacing) {}
+
+    void addChild(std::shared_ptr<ASTNode> child) override {
+        child->shift(x + style.spacing, currentYOffset); 
+        currentYOffset += 40 + style.spacing; 
+        children.push_back(child);
+    }
+};
+
+// 6. Horizontal Stack
+class HStackNode : public BoxNode {
+private:
+    float currentXOffset;
+public:
+    HStackNode(std::string id, float x, float y, float w, float h, VESStyle s)
+        : BoxNode(id, x, y, w, h, s), currentXOffset(x + s.spacing) {}
+
+    void addChild(std::shared_ptr<ASTNode> child) override {
+        child->shift(currentXOffset, y + style.spacing); 
+        currentXOffset += 80 + style.spacing; 
+        children.push_back(child);
+    }
+};
+
+// 7. Circle Element (Fixed abstract class crash!)
 class CircleNode : public ASTNode {
 private:
     std::string id;
@@ -139,11 +195,12 @@ public:
     CircleNode(std::string id, float cx, float cy, float r, VESStyle s)
         : id(std::move(id)), cx(cx), cy(cy), radius(r), style(std::move(s)) {}
 
+    void shift(float dx, float dy) override { cx += dx; cy += dy; } // Fixed!
+
     std::string getId() const override { return id; }
     std::string getOnClick() const override { return style.onClick; }
     bool contains(float px, float py) const override {
-        float dx = px - cx;
-        float dy = py - cy;
+        float dx = px - cx; float dy = py - cy;
         return (dx * dx + dy * dy) <= (radius * radius);
     }
 

@@ -61,4 +61,7 @@ public:
     const std::vector<std::shared_ptr<ASTNode>>& getActiveNodes() const { return activeNodes; }
     bool isDirty() const { return dirty; }
     void clearDirty() { dirty = false; }
+    
+    // NEW: Allow backend libraries to trigger a screen redraw!
+    void markDirty() { dirty = true; }
 };

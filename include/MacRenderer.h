@@ -19,25 +19,24 @@ private:
 
 public:
     NativeRenderer(int w = 240, int h = 240) : width(w), height(h) {
-        if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-            std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
-            return;
-        }
+        if (SDL_Init(SDL_INIT_VIDEO) < 0) return;
 
-        // Create the interactive hardware window!
-        window = SDL_CreateWindow("VectorScript Firmware Simulator", 
+        // NEW: Simulator Scale (Draws a 480x480 window so macOS doesn't clip it!)
+        int scale = 2; 
+        window = SDL_CreateWindow("VectorOS Simulator", 
                                   SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
-                                  width, height, SDL_WINDOW_SHOWN);
+                                  width * scale, height * scale, SDL_WINDOW_SHOWN);
         
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
         
-        // This texture acts exactly like our Linux Framebuffer memory!
+        // NEW: Tell SDL to map our 240x240 pixels perfectly into the scaled window!
+        SDL_RenderSetLogicalSize(renderer, width, height); 
+        
         texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, 
                                     SDL_TEXTUREACCESS_STREAMING, width, height);
                                     
-        std::cout << "[Mac Test Mode] SDL2 Interactive Engine Initialized." << std::endl;
+        std::cout << "[Mac Test Mode] SDL2 Interactive Engine Initialized at 2x Scale." << std::endl;
     }
-
     ~NativeRenderer() {
         SDL_DestroyTexture(texture);
         SDL_DestroyRenderer(renderer);

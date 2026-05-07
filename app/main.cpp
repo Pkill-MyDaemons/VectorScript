@@ -32,6 +32,7 @@ int main() {
         #ifdef __APPLE__
         isRunning = display.pollEvents(touchX, touchY, isTouched);
         #endif
+        utils::tick();
 
         // Process Touches against the ACTIVE page
         if (isTouched) {

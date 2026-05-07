@@ -41,6 +41,10 @@ private:
                 style.onClick = consume(TokenType::String, "Expected C++ function.").value;
             } else if (key == "align") {
                 style.align = consume(TokenType::String, "Expected alignment.").value;
+            } else if (key == "gradient") {
+                style.gradient = consume(TokenType::String, "Expected comma separated colors.").value;
+            } else if (key == "spacing") {
+                style.spacing = std::stof(consume(TokenType::Number, "Expected spacing value.").value);
             } else if (key == "child" && parentBox != nullptr) {
                 
                 // --- NEW: Variable Lookup! ---
@@ -74,12 +78,14 @@ private:
     }
 
     // --- ELEMENT PARSERS ---
-    std::shared_ptr<ASTNode> parseBoxDeclaration() {
-        consume(TokenType::Identifier, "Expected 'Box'");
+    std::shared_ptr<ASTNode> parseBoxDeclaration(const std::string& type) {
+        consume(TokenType::Identifier, "Expected type declaration"); 
+        
+        // Now it correctly grabs 'menu' as the variable name, and '=' as the operator!
         std::string varName = consume(TokenType::Identifier, "Expected id").value;
         consume(TokenType::Equals, "Expected '='");
         consume(TokenType::New, "Expected 'new'");
-        consume(TokenType::Identifier, "Expected 'Box'");
+        consume(TokenType::Identifier, "Expected type"); 
         consume(TokenType::LParen, "Expected '('");
 
         float x = std::stof(consume(TokenType::Number, "Expected X").value); consume(TokenType::Comma, ",");
@@ -88,21 +94,27 @@ private:
         float h = std::stof(consume(TokenType::Number, "Expected Height").value);
         consume(TokenType::RParen, "Expected ')'");
 
-        auto box = std::make_shared<BoxNode>(varName, x, y, w, h, VESStyle());
-        VESStyle s = parseStyleBlock(box); 
+        std::shared_ptr<BoxNode> container;
+        if (type == "VStack") container = std::make_shared<VStackNode>(varName, x, y, w, h, VESStyle());
+        else if (type == "HStack") container = std::make_shared<HStackNode>(varName, x, y, w, h, VESStyle());
+        else container = std::make_shared<BoxNode>(varName, x, y, w, h, VESStyle());
+
+        VESStyle s = parseStyleBlock(container); 
         
-        auto finalBox = std::make_shared<BoxNode>(varName, x, y, w, h, s);
-        for(auto& child : box->getChildren()) finalBox->addChild(child);
+        // Re-build with final styles
+        std::shared_ptr<BoxNode> finalContainer;
+        if (type == "VStack") finalContainer = std::make_shared<VStackNode>(varName, x, y, w, h, s);
+        else if (type == "HStack") finalContainer = std::make_shared<HStackNode>(varName, x, y, w, h, s);
+        else finalContainer = std::make_shared<BoxNode>(varName, x, y, w, h, s);
+
+        for(auto& child : container->getChildren()) finalContainer->addChild(child);
 
         consume(TokenType::SemiColon, "Expected ';'");
-        
-        // Save to Symbol Table!
-        environment[varName] = finalBox;
-        return finalBox;
+        environment[varName] = finalContainer;
+        return finalContainer;
     }
 
     std::shared_ptr<ASTNode> parseTextDeclaration() {
-        consume(TokenType::Identifier, "Expected 'Text'");
         std::string varName = consume(TokenType::Identifier, "Expected id").value;
         consume(TokenType::Equals, "Expected '='");
         consume(TokenType::New, "Expected 'new'");
@@ -111,14 +123,24 @@ private:
 
         float x = std::stof(consume(TokenType::Number, "Expected X").value); consume(TokenType::Comma, ",");
         float y = std::stof(consume(TokenType::Number, "Expected Y").value); consume(TokenType::Comma, ",");
-        std::string content = consume(TokenType::String, "Expected text content").value;
+        
+        std::string content = "";
+        std::string binding = "";
+        
+        // Is it a static string, or a dynamic data binding?
+        if (current().type == TokenType::String) {
+            content = consume(TokenType::String, "Expected text content").value;
+        } else if (current().type == TokenType::Identifier) {
+            binding = consume(TokenType::Identifier, "Expected variable binding").value;
+        }
+        
         consume(TokenType::RParen, "Expected ')'");
 
-        VESStyle s = parseStyleBlock();
+        VESStyle s = parseStyleBlock(nullptr);
         consume(TokenType::SemiColon, "Expected ';'");
 
-        auto node = std::make_shared<TextNode>(varName, x, y, content, s);
-        environment[varName] = node; // Save to Symbol Table!
+        auto node = std::make_shared<TextNode>(varName, x, y, content, binding, s);
+        environment[varName] = node;
         return node;
     }
 
@@ -146,12 +168,19 @@ private:
 public:
     Parser(std::vector<Token> toks) : tokens(std::move(toks)) {}
 
+    // Replaces your main parse() loop at the bottom
     std::vector<std::shared_ptr<ASTNode>> parse() {
         std::vector<std::shared_ptr<ASTNode>> nodes;
 
         while (current().type != TokenType::EndOfFile) {
-            if (current().type == TokenType::Identifier && current().value == "Box") {
-                nodes.push_back(parseBoxDeclaration());
+            
+            // Look for Box, VStack, OR HStack!
+            if (current().type == TokenType::Identifier && current().value == "import") {
+                pos++; // Skip 'import'
+                pos++; // Skip the library name (e.g. 'utils')
+            } else if (current().type == TokenType::Identifier && 
+               (current().value == "Box" || current().value == "VStack" || current().value == "HStack")) {
+                nodes.push_back(parseBoxDeclaration(current().value));
             } 
             else if (current().type == TokenType::Identifier && current().value == "Text") {
                 nodes.push_back(parseTextDeclaration());

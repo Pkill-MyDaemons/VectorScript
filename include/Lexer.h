@@ -47,7 +47,7 @@ public:
             if (isalpha(c)) {
                 std::string ident;
                 // Allow letters, numbers, and underscores
-                while (isalnum(peek()) || peek() == '_') ident += advance(); 
+                while (isalnum(peek()) || peek() == '_' || peek() == '.') ident += advance(); 
                 
                 if (ident == "new") tokens.push_back({TokenType::New, ident});
                 else tokens.push_back({TokenType::Identifier, ident});
