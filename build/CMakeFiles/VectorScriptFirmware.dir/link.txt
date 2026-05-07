@@ -1,1 +1,0 @@
-/usr/bin/c++  -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/VectorScriptFirmware.dir/app/main.cpp.o -o VectorScriptFirmware   -L/opt/homebrew/Cellar/sdl2/2.32.10/lib  -Wl,-rpath,/opt/homebrew/Cellar/sdl2/2.32.10/lib /Users/henry/my_libs/lib/liblunasvg.a /opt/homebrew/Cellar/sdl2/2.32.10/lib/libSDL2.dylib /Users/henry/my_libs/lib/libplutovg.a -lm
