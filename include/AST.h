@@ -12,6 +12,22 @@ struct VESStyle {
     std::string align = "left"; 
 };
 
+inline std::string sanitizeXML(const std::string& input) {
+    std::string output;
+    output.reserve(input.length()); // Optimize memory allocation
+    for (char c : input) {
+        switch (c) {
+            case '&':  output += "&amp;"; break;
+            case '<':  output += "&lt;"; break;
+            case '>':  output += "&gt;"; break;
+            case '"':  output += "&quot;"; break;
+            case '\'': output += "&apos;"; break;
+            default:   output += c; break;
+        }
+    }
+    return output;
+}
+
 // 2. Base Node
 class ASTNode {
 public:
@@ -51,11 +67,12 @@ public:
 
     std::string asSVG() const override {
         std::ostringstream svg;
-        // Notice the text-anchor and dominant-baseline properties!
         svg << "  <text id=\"" << id << "\" x=\"" << x << "\" y=\"" << y 
             << "\" fill=\"" << style.fill << "\" font-size=\"" << style.fontSize 
             << "\" font-family=\"sans-serif\" text-anchor=\"" << anchor 
-            << "\" dominant-baseline=\"central\">" << content << "</text>\n";
+            << "\" dominant-baseline=\"central\">" 
+            << sanitizeXML(content)
+            << "</text>\n";
         return svg.str();
     }
 };

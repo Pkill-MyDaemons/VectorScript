@@ -1,23 +1,65 @@
 #pragma once
 
-// ONLY compile this file if we are on macOS!
 #ifdef __APPLE__
 
 #include <string>
 #include <vector>
 #include <memory>
 #include <iostream>
-#include <ApplicationServices/ApplicationServices.h> // Apple Quartz
+#include <SDL.h>
 #include <lunasvg.h>
 #include "AST.h"
 
 class NativeRenderer {
 private:
+    SDL_Window* window = nullptr;
+    SDL_Renderer* renderer = nullptr;
+    SDL_Texture* texture = nullptr;
     int width, height;
 
 public:
     NativeRenderer(int w = 240, int h = 240) : width(w), height(h) {
-        std::cout << "[Mac Test Mode] Quartz Graphics Engine Initialized." << std::endl;
+        if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+            std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
+            return;
+        }
+
+        // Create the interactive hardware window!
+        window = SDL_CreateWindow("VectorScript Firmware Simulator", 
+                                  SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
+                                  width, height, SDL_WINDOW_SHOWN);
+        
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+        
+        // This texture acts exactly like our Linux Framebuffer memory!
+        texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, 
+                                    SDL_TEXTUREACCESS_STREAMING, width, height);
+                                    
+        std::cout << "[Mac Test Mode] SDL2 Interactive Engine Initialized." << std::endl;
+    }
+
+    ~NativeRenderer() {
+        SDL_DestroyTexture(texture);
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+    }
+
+    // NEW: SDL Event Poller (Replaces reading /dev/input/event0 on Linux)
+    bool pollEvents(float& touchX, float& touchY, bool& isTouched) {
+        SDL_Event e;
+        isTouched = false;
+        while (SDL_PollEvent(&e) != 0) {
+            if (e.type == SDL_QUIT) {
+                return false; // User closed the window
+            }
+            if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+                touchX = static_cast<float>(e.button.x);
+                touchY = static_cast<float>(e.button.y);
+                isTouched = true;
+            }
+        }
+        return true; // Keep running
     }
 
     void renderToScreen(const std::vector<std::shared_ptr<ASTNode>>& nodes) {
@@ -30,29 +72,12 @@ public:
         auto document = lunasvg::Document::loadFromData(svgString.str());
         if (!document) return;
         auto bitmap = document->renderToBitmap(width, height);
-        
-        // 2. Wrap LunaSVG pixels in a Quartz CGImage
-        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-        CGContextRef context = CGBitmapContextCreate(
-            (void*)bitmap.data(), width, height, 8, width * 4, colorSpace,
-            kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
-        );
-        CGImageRef imageRef = CGBitmapContextCreateImage(context);
 
-        // 3. Save to PNG using CoreGraphics (No external libraries needed!)
-        CFURLRef url = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, CFSTR("mac_test_output.png"), kCFURLPOSIXPathStyle, false);
-        CGImageDestinationRef destination = CGImageDestinationCreateWithURL(url, kUTTypePNG, 1, NULL);
-        CGImageDestinationAddImage(destination, imageRef, NULL);
-        CGImageDestinationFinalize(destination);
-
-        // Cleanup Quartz memory
-        CFRelease(destination);
-        CFRelease(url);
-        CGImageRelease(imageRef);
-        CGContextRelease(context);
-        CGColorSpaceRelease(colorSpace);
-
-        std::cout << "[Mac Test Mode] Rendered frame to mac_test_output.png" << std::endl;
+        // 2. Blast the pixels to the SDL Window!
+        SDL_UpdateTexture(texture, nullptr, bitmap.data(), width * 4);
+        SDL_RenderClear(renderer);
+        SDL_RenderCopy(renderer, texture, nullptr, nullptr);
+        SDL_RenderPresent(renderer);
     }
 };
 

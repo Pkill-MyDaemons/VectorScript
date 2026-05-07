@@ -1,0 +1,9 @@
+Box bg = new Box(0, 0, 240, 240) { fill: "#1E1E2E" };
+
+Text clock = new Text(0, 0, "12:00") { fill: "#A6E3A1", size: 48 };
+Box center_face = new Box(0, 0, 240, 180) { align: "center", child: clock };
+
+Box app_btn = new Box(40, 190, 160, 40) { 
+    fill: "#F38BA8", align: "center", onClick: "route:apps.ves",
+    child: new Text("Apps") { fill: "#11111B", size: 16 }
+};

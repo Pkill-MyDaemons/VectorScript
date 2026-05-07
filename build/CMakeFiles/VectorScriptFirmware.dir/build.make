@@ -96,6 +96,7 @@ VectorScriptFirmware_EXTERNAL_OBJECTS =
 VectorScriptFirmware: CMakeFiles/VectorScriptFirmware.dir/app/main.cpp.o
 VectorScriptFirmware: CMakeFiles/VectorScriptFirmware.dir/build.make
 VectorScriptFirmware: /Users/henry/my_libs/lib/liblunasvg.a
+VectorScriptFirmware: /opt/homebrew/Cellar/sdl2/2.32.10/lib/libSDL2.dylib
 VectorScriptFirmware: /Users/henry/my_libs/lib/libplutovg.a
 VectorScriptFirmware: CMakeFiles/VectorScriptFirmware.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/henry/Developer/VectorScript/VectorScript/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable VectorScriptFirmware"

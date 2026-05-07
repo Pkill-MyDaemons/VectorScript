@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/c++
 CXX_DEFINES = -DLUNASVG_BUILD_STATIC
 
-CXX_INCLUDES = -I/Users/henry/Developer/VectorScript/VectorScript/include -isystem /Users/henry/my_libs/include/lunasvg
+CXX_INCLUDES = -I/Users/henry/Developer/VectorScript/VectorScript/include -I/opt/homebrew/Cellar/sdl2/2.32.10/include -isystem /opt/homebrew/Cellar/sdl2/2.32.10/include/SDL2 -isystem /Users/henry/my_libs/include/lunasvg
 
 CXX_FLAGSarm64 = -std=gnu++17 -arch arm64
 

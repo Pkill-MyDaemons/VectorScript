@@ -1,0 +1,12 @@
+Box bg = new Box(0, 0, 240, 240) { fill: "#313244" };
+
+Box back_btn = new Box(10, 10, 80, 30) { 
+    fill: "#A6E3A1", align: "center", onClick: "route:home.ves",
+    child: new Text("<- Back") { fill: "#11111B", size: 14 }
+};
+
+Text title = new Text(0, 0, "App List") { fill: "#CDD6F4", size: 24 };
+Box header = new Box(0, 60, 240, 40) { align: "center", child: title };
+
+Box calc_app = new Box(40, 120, 60, 60) { fill: "#F9E2AF" };
+Box weather_app = new Box(140, 120, 60, 60) { fill: "#89B4FA" };
