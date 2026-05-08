@@ -14,6 +14,7 @@ inline std::vector<std::string> splitString(const std::string& s, char delim) {
     return result;
 }
 class ASTNode;
+class IconNode;
 // 1. Updated Style Structure
 struct VESStyle {
     std::string fill = "none";
@@ -51,9 +52,11 @@ public:
     virtual bool contains(float px, float py) const = 0;
     virtual std::string getOnClick() const = 0;
     virtual std::string getId() const = 0;
-    
-    // NEW: Allows Layout Engines to move elements dynamically!
     virtual void shift(float dx, float dy) = 0; 
+    
+    // NEW: Allow the layout engine to measure any node!
+    virtual float getWidth() const { return 0; }
+    virtual float getHeight() const { return 0; }
 };
 
 // 3. Text Element (Moved up so Box can see it)
@@ -72,6 +75,9 @@ public:
     // Notice the constructor requires the 'bind' string now
     TextNode(std::string id, float x, float y, std::string text, std::string bind, VESStyle s)
         : id(std::move(id)), x(x), y(y), content(std::move(text)), binding(std::move(bind)), style(std::move(s)) {}
+        
+    float getWidth() const override { return content.length() * (style.fontSize * 0.6f); }
+    float getHeight() const override { return style.fontSize; }
 
     // --- Mutators ---
     void setX(float nx) { x = nx; }
@@ -107,7 +113,58 @@ public:
         return svg.str();
     }
 };
+class IconNode : public ASTNode {
+private:
+    std::string id, filepath;
+    float x, y, width, height;
+    VESStyle style;
+    std::string svgCache;
 
+public:
+    IconNode(std::string id, float x, float y, float w, float h, std::string path, VESStyle s)
+        : id(std::move(id)), x(x), y(y), width(w), height(h), filepath(std::move(path)), style(std::move(s)) {
+        std::ifstream file("views/" + filepath);
+        if (file.is_open()) {
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            svgCache = buffer.str();
+            
+            // --- THE FIX: Explicitly find the <svg> tag, skipping any <?xml> headers! ---
+            size_t svgStart = svgCache.find("<svg");
+            if (svgStart != std::string::npos) {
+                size_t start = svgCache.find(">", svgStart);
+                size_t end = svgCache.rfind("</svg>");
+                if (start != std::string::npos && end != std::string::npos) {
+                    svgCache = svgCache.substr(start + 1, end - start - 1);
+                }
+            }
+        } else {
+            svgCache = "<rect width=\"24\" height=\"24\" fill=\"red\"/>";
+        }
+    }
+    void setX(float nx) { x = nx; }
+    void setY(float ny) { y = ny; }
+    float getWidth() const { return width; }
+    float getHeight() const { return height; }
+
+    void shift(float dx, float dy) override { x += dx; y += dy; }
+    std::string getId() const override { return id; }
+    std::string getOnClick() const override { return style.onClick; }
+    bool contains(float px, float py) const override { return (px >= x && px <= x + width && py >= y && py <= y + height); }
+
+    std::string asSVG() const override {
+        std::ostringstream svg;
+        std::string iconColor = (style.fill == "none") ? "#11111B" : style.fill;
+
+        svg << "  <svg id=\"" << id << "\" x=\"" << x << "\" y=\"" << y 
+            << "\" width=\"" << width << "\" height=\"" << height 
+            << "\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"" << iconColor 
+            << "\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n"
+            << svgCache << "\n  </svg>\n";
+            
+        return svg.str();
+    }
+};
 // 4. Box Element (The Container)
 // 4. Box Element (Now with Gradients!)
 class BoxNode : public ASTNode {
@@ -120,9 +177,14 @@ protected:
 public:
     BoxNode(std::string id, float x, float y, float w, float h, VESStyle s)
         : id(std::move(id)), x(x), y(y), width(w), height(h), style(std::move(s)) {}
+        void setX(float nx) { x = nx; }
+        void setY(float ny) { y = ny; }
+        float getWidth() const { return width; }
+        float getHeight() const { return height; }
 
     // Notice the 'virtual' keyword! This lets Stacks override it.
     virtual void addChild(std::shared_ptr<ASTNode> child) {
+        // 1. Is it Text?
         if (auto textChild = std::dynamic_pointer_cast<TextNode>(child)) {
             if (style.align == "center") {
                 textChild->setX(x + width / 2.0f);
@@ -133,7 +195,28 @@ public:
                 textChild->setY(y + 20);
                 textChild->setAnchor("start");
             }
+        } 
+        // 2. Is it an Icon?
+        else if (auto iconChild = std::dynamic_pointer_cast<IconNode>(child)) {
+            if (style.align == "center") {
+                // Center it perfectly using the Box's width and the Icon's width!
+                iconChild->setX(x + (width - iconChild->getWidth()) / 2.0f);
+                iconChild->setY(y + (height - iconChild->getHeight()) / 2.0f);
+            } else {
+                iconChild->setX(x + 10);
+                iconChild->setY(y + 10);
+            }
+        } else if(auto boxChild = std::dynamic_pointer_cast<BoxNode>(child)){
+            if (style.align == "center") {
+                // Center it perfectly using the Box's width and the Icon's width!
+                boxChild->setX(x + (width - boxChild->getWidth()) / 2.0f);
+                boxChild->setY(y + (height - boxChild->getHeight()) / 2.0f);
+            } else {
+                iconChild->setX(x + 10);
+                boxChild->setY(y + 10);
+            }
         }
+        
         children.push_back(child);
     }
 
@@ -179,31 +262,45 @@ private:
     float currentYOffset;
 public:
     VStackNode(std::string id, float x, float y, float w, float h, VESStyle s)
-        : BoxNode(id, x, y, w, h, s), currentYOffset(y + s.spacing) {}
+        : BoxNode(id, x, y, w, h, s), currentYOffset(y) {}
 
     void addChild(std::shared_ptr<ASTNode> child) override {
-        child->shift(x, currentYOffset); 
-        currentYOffset += 40 + style.spacing; 
+        float childX = x; // Default: left aligned with padding
+        
+        // Cross-Axis Alignment: Center the child horizontally!
+        if (style.align == "center") {
+            childX = x + (width - child->getWidth()) / 2.0f;
+        }
+
+        child->shift(childX, currentYOffset); 
+        
+        // Measure the child's exact height so the next item doesn't overlap!
+        currentYOffset += child->getHeight() + style.spacing; 
         children.push_back(child);
     }
 };
 
-// 6. Horizontal Stack
+// 6. Horizontal Stack (Dynamic Auto-Layout!)
 class HStackNode : public BoxNode {
 private:
     float currentXOffset;
 public:
     HStackNode(std::string id, float x, float y, float w, float h, VESStyle s)
-        : BoxNode(id, x, y, w, h, s), currentXOffset(x + s.spacing) {}
+        : BoxNode(id, x, y, w, h, s), currentXOffset(x) {}
 
     void addChild(std::shared_ptr<ASTNode> child) override {
-        child->shift(currentXOffset, y + style.spacing); 
-        currentXOffset += 80 + style.spacing; 
+        float childY = y;
+        
+        if (style.align == "center") {
+            childY = y + (height - child->getHeight()) / 2.0f;
+        }
+
+        child->shift(currentXOffset, childY); 
+        currentXOffset += child->getWidth() + style.spacing; 
         children.push_back(child);
     }
 };
 
-// 7. Circle Element (Fixed abstract class crash!)
 class CircleNode : public ASTNode {
 private:
     std::string id;
@@ -230,47 +327,4 @@ public:
         return svg.str();
     }
 };
-// 8. Vector Icon Node (Reads an SVG file from disk and injects it!)
-class IconNode : public ASTNode {
-private:
-    std::string id, filepath;
-    float x, y, width, height;
-    VESStyle style;
-    std::string svgCache; // Stores the file contents so we don't read the hard drive 60 times a second!
-
-public:
-    IconNode(std::string id, float x, float y, float w, float h, std::string path, VESStyle s)
-        : id(std::move(id)), x(x), y(y), width(w), height(h), filepath(std::move(path)), style(std::move(s)) {
-        
-        // Read the icon file from the views directory
-        std::ifstream file("views/" + filepath);
-        if (file.is_open()) {
-            std::stringstream buffer;
-            buffer << file.rdbuf();
-            svgCache = buffer.str();
-            
-            // Strip the outer <svg> wrapper so we just inject the raw paths!
-            size_t start = svgCache.find(">");
-            size_t end = svgCache.rfind("</svg>");
-            if (start != std::string::npos && end != std::string::npos) {
-                svgCache = svgCache.substr(start + 1, end - start - 1);
-            }
-        } else {
-            // If the file is missing, draw a red error box
-            svgCache = "<rect width=\"" + std::to_string(width) + "\" height=\"" + std::to_string(height) + "\" fill=\"red\"/>";
-        }
-    }
-
-    void shift(float dx, float dy) override { x += dx; y += dy; }
-    std::string getId() const override { return id; }
-    std::string getOnClick() const override { return style.onClick; }
-    bool contains(float px, float py) const override { return (px >= x && px <= x + width && py >= y && py <= y + height); }
-
-    std::string asSVG() const override {
-        std::ostringstream svg;
-        // Wrap the injected paths in a Group <g> tag to move them to the correct X/Y position
-        svg << "  <g id=\"" << id << "\" transform=\"translate(" << x << ", " << y << ")\">\n"
-            << svgCache << "\n  </g>\n";
-        return svg.str();
-    }
-};
+// 8. Vector Icon Node (Now immune to hidden XML headers!)
