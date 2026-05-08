@@ -13,15 +13,18 @@ inline std::vector<std::string> splitString(const std::string& s, char delim) {
     while (getline(ss, item, delim)) result.push_back(item);
     return result;
 }
-
+class ASTNode;
 // 1. Updated Style Structure
 struct VESStyle {
     std::string fill = "none";
-    std::string gradient = ""; // NEW: E.g., "#FF0000,#00FF00"
+    std::string gradient = ""; 
     int fontSize = 16;
     std::string onClick = ""; 
     std::string align = "left"; 
-    float spacing = 10;        // NEW: Gap between Stack items
+    float spacing = 10;        
+    
+    // NEW: Safely holds children in memory until the parser is finished!
+    std::vector<std::shared_ptr<ASTNode>> children; 
 };
 
 inline std::string sanitizeXML(const std::string& input) {
@@ -55,36 +58,52 @@ public:
 
 // 3. Text Element (Moved up so Box can see it)
 // 3. Text Element
+// 3. Text Element (Now with Data Binding & Stack Support!)
 class TextNode : public ASTNode {
 private:
     std::string id;
     float x, y;
     std::string content;
-    std::string binding; // NEW: Holds "utils.Time"
+    std::string binding; // NEW: Holds variables like "utils.Time"
     VESStyle style;
     std::string anchor = "start";
 
 public:
-    // Notice the new 'binding' parameter
+    // Notice the constructor requires the 'bind' string now
     TextNode(std::string id, float x, float y, std::string text, std::string bind, VESStyle s)
         : id(std::move(id)), x(x), y(y), content(std::move(text)), binding(std::move(bind)), style(std::move(s)) {}
 
-    // ... keeping setters and shift the same ...
+    // --- Mutators ---
+    void setX(float nx) { x = nx; }
+    void setY(float ny) { y = ny; }
+    void setAnchor(std::string a) { anchor = std::move(a); }
+    std::string getContent() const { return content; }
+    void setContent(std::string newText) { content = std::move(newText); }
 
+    // --- ASTNode Overrides ---
+    void shift(float dx, float dy) override { x += dx; y += dy; } // Allows VStacks to push this text down!
+    std::string getId() const override { return id; }
+    std::string getOnClick() const override { return style.onClick; }
+    bool contains(float px, float py) const override { return false; } 
+
+    // --- Rendering Engine ---
     std::string asSVG() const override {
-        // DATA BINDING MAGIC!
+        
+        // 1. DATA BINDING MAGIC! (If bound to a variable, grab live data from C++ state)
         std::string displayText = content;
         if (!binding.empty() && VESState::values.count(binding)) {
             displayText = VESState::values[binding];
         }
 
+        // 2. Generate the SVG string
         std::ostringstream svg;
         svg << "  <text id=\"" << id << "\" x=\"" << x << "\" y=\"" << y 
             << "\" fill=\"" << style.fill << "\" font-size=\"" << style.fontSize 
             << "\" font-family=\"sans-serif\" text-anchor=\"" << anchor 
             << "\" dominant-baseline=\"central\">" 
-            << sanitizeXML(displayText) 
+            << sanitizeXML(displayText) // 3. SANITIZER: Keeps LunaSVG from crashing on '<' symbols!
             << "</text>\n";
+            
         return svg.str();
     }
 };
@@ -163,7 +182,7 @@ public:
         : BoxNode(id, x, y, w, h, s), currentYOffset(y + s.spacing) {}
 
     void addChild(std::shared_ptr<ASTNode> child) override {
-        child->shift(x + style.spacing, currentYOffset); 
+        child->shift(x, currentYOffset); 
         currentYOffset += 40 + style.spacing; 
         children.push_back(child);
     }
@@ -208,6 +227,50 @@ public:
         std::ostringstream svg;
         svg << "  <circle id=\"" << id << "\" cx=\"" << cx << "\" cy=\"" << cy 
             << "\" r=\"" << radius << "\" fill=\"" << style.fill << "\" />\n";
+        return svg.str();
+    }
+};
+// 8. Vector Icon Node (Reads an SVG file from disk and injects it!)
+class IconNode : public ASTNode {
+private:
+    std::string id, filepath;
+    float x, y, width, height;
+    VESStyle style;
+    std::string svgCache; // Stores the file contents so we don't read the hard drive 60 times a second!
+
+public:
+    IconNode(std::string id, float x, float y, float w, float h, std::string path, VESStyle s)
+        : id(std::move(id)), x(x), y(y), width(w), height(h), filepath(std::move(path)), style(std::move(s)) {
+        
+        // Read the icon file from the views directory
+        std::ifstream file("views/" + filepath);
+        if (file.is_open()) {
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            svgCache = buffer.str();
+            
+            // Strip the outer <svg> wrapper so we just inject the raw paths!
+            size_t start = svgCache.find(">");
+            size_t end = svgCache.rfind("</svg>");
+            if (start != std::string::npos && end != std::string::npos) {
+                svgCache = svgCache.substr(start + 1, end - start - 1);
+            }
+        } else {
+            // If the file is missing, draw a red error box
+            svgCache = "<rect width=\"" + std::to_string(width) + "\" height=\"" + std::to_string(height) + "\" fill=\"red\"/>";
+        }
+    }
+
+    void shift(float dx, float dy) override { x += dx; y += dy; }
+    std::string getId() const override { return id; }
+    std::string getOnClick() const override { return style.onClick; }
+    bool contains(float px, float py) const override { return (px >= x && px <= x + width && py >= y && py <= y + height); }
+
+    std::string asSVG() const override {
+        std::ostringstream svg;
+        // Wrap the injected paths in a Group <g> tag to move them to the correct X/Y position
+        svg << "  <g id=\"" << id << "\" transform=\"translate(" << x << ", " << y << ")\">\n"
+            << svgCache << "\n  </g>\n";
         return svg.str();
     }
 };

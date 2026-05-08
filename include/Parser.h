@@ -23,65 +23,54 @@ private:
     }
 
     // --- HELPER: Parse Styles and Children ---
-    VESStyle parseStyleBlock(std::shared_ptr<BoxNode> parentBox = nullptr) {
+    VESStyle parseStyleBlock() {
         VESStyle style;
-        if (current().type != TokenType::LBrace) return style;
-
+        if (current().type != TokenType::LBrace) return style; 
         consume(TokenType::LBrace, "Expected '{'");
-
-        while (current().type != TokenType::RBrace) {
-            std::string key = consume(TokenType::Identifier, "Expected style key.").value;
+        
+        while (current().type != TokenType::RBrace && current().type != TokenType::EndOfFile) {
+            std::string key = consume(TokenType::Identifier, "Expected style property").value;
             consume(TokenType::Colon, "Expected ':'");
-
+            
             if (key == "fill") {
-                style.fill = consume(TokenType::String, "Expected color.").value;
-            } else if (key == "size") {
-                style.fontSize = std::stof(consume(TokenType::Number, "Expected size.").value);
-            } else if (key == "onClick") {
-                style.onClick = consume(TokenType::String, "Expected C++ function.").value;
-            } else if (key == "align") {
-                style.align = consume(TokenType::String, "Expected alignment.").value;
+                style.fill = consume(TokenType::String, "Expected color").value;
             } else if (key == "gradient") {
                 style.gradient = consume(TokenType::String, "Expected comma separated colors.").value;
+            } else if (key == "size") {
+                style.fontSize = std::stoi(consume(TokenType::Number, "Expected number").value);
+            } else if (key == "align") {
+                style.align = consume(TokenType::String, "Expected string").value;
+            } else if (key == "onClick") {
+                style.onClick = consume(TokenType::String, "Expected string").value;
             } else if (key == "spacing") {
                 style.spacing = std::stof(consume(TokenType::Number, "Expected spacing value.").value);
-            } else if (key == "child" && parentBox != nullptr) {
-                
-                // --- NEW: Variable Lookup! ---
+            } else if (key == "child") {
                 if (current().type == TokenType::Identifier) {
-                    std::string varName = consume(TokenType::Identifier, "Expected variable name.").value;
-                    
-                    // Does this variable exist in our memory?
-                    if (environment.find(varName) != environment.end()) {
-                        parentBox->addChild(environment[varName]); // Link it!
-                    } else {
-                        throw std::runtime_error("VectorScript Error: Undefined variable '" + varName + "'");
+                    std::string childName = consume(TokenType::Identifier, "Expected child name").value;
+                    if (environment.count(childName)) {
+                        style.children.push_back(environment[childName]); // Store it safely!
                     }
-                } 
-                // Fallback: We still support the old inline syntax just in case
-                else if (current().type == TokenType::New) {
+                } else if (current().type == TokenType::New) {
                     consume(TokenType::New, "Expected 'new'");
-                    consume(TokenType::Identifier, "Expected 'Text'");
-                    consume(TokenType::LParen, "Expected '('");
-                    std::string content = consume(TokenType::String, "Expected string.").value;
-                    consume(TokenType::RParen, "Expected ')'");
-                    VESStyle childStyle = parseStyleBlock(nullptr); 
-                    parentBox->addChild(std::make_shared<TextNode>("inline_child", 0, 0, content, childStyle));
+                    std::string childType = consume(TokenType::Identifier, "Expected type").value;
+                    if (childType == "Text") {
+                        consume(TokenType::LParen, "Expected '('");
+                        std::string content = consume(TokenType::String, "Expected string").value;
+                        consume(TokenType::RParen, "Expected ')'");
+                        VESStyle childStyle = parseStyleBlock();
+                        style.children.push_back(std::make_shared<TextNode>("inline_child", 0, 0, content, "", childStyle));
+                    }
                 }
             }
-
             if (current().type == TokenType::Comma) consume(TokenType::Comma, "Expected ','");
         }
-
         consume(TokenType::RBrace, "Expected '}'");
         return style;
     }
 
-    // --- ELEMENT PARSERS ---
+    // 2. Cleaned Box/Stack Parser
     std::shared_ptr<ASTNode> parseBoxDeclaration(const std::string& type) {
-        consume(TokenType::Identifier, "Expected type declaration"); 
-        
-        // Now it correctly grabs 'menu' as the variable name, and '=' as the operator!
+        consume(TokenType::Identifier, "Expected type declaration");
         std::string varName = consume(TokenType::Identifier, "Expected id").value;
         consume(TokenType::Equals, "Expected '='");
         consume(TokenType::New, "Expected 'new'");
@@ -94,27 +83,25 @@ private:
         float h = std::stof(consume(TokenType::Number, "Expected Height").value);
         consume(TokenType::RParen, "Expected ')'");
 
+        // Parse the styles and grab the children
+        VESStyle s = parseStyleBlock();
+
         std::shared_ptr<BoxNode> container;
-        if (type == "VStack") container = std::make_shared<VStackNode>(varName, x, y, w, h, VESStyle());
-        else if (type == "HStack") container = std::make_shared<HStackNode>(varName, x, y, w, h, VESStyle());
-        else container = std::make_shared<BoxNode>(varName, x, y, w, h, VESStyle());
+        if (type == "VStack") container = std::make_shared<VStackNode>(varName, x, y, w, h, s);
+        else if (type == "HStack") container = std::make_shared<HStackNode>(varName, x, y, w, h, s);
+        else container = std::make_shared<BoxNode>(varName, x, y, w, h, s);
 
-        VESStyle s = parseStyleBlock(container); 
-        
-        // Re-build with final styles
-        std::shared_ptr<BoxNode> finalContainer;
-        if (type == "VStack") finalContainer = std::make_shared<VStackNode>(varName, x, y, w, h, s);
-        else if (type == "HStack") finalContainer = std::make_shared<HStackNode>(varName, x, y, w, h, s);
-        else finalContainer = std::make_shared<BoxNode>(varName, x, y, w, h, s);
-
-        for(auto& child : container->getChildren()) finalContainer->addChild(child);
+        // Add the children exactly ONCE!
+        for (auto& child : s.children) {
+            container->addChild(child);
+        }
 
         consume(TokenType::SemiColon, "Expected ';'");
-        environment[varName] = finalContainer;
-        return finalContainer;
+        environment[varName] = container;
+        return container;
     }
-
     std::shared_ptr<ASTNode> parseTextDeclaration() {
+        consume(TokenType::Identifier, "Expected 'Text' declaration");
         std::string varName = consume(TokenType::Identifier, "Expected id").value;
         consume(TokenType::Equals, "Expected '='");
         consume(TokenType::New, "Expected 'new'");
@@ -136,10 +123,33 @@ private:
         
         consume(TokenType::RParen, "Expected ')'");
 
-        VESStyle s = parseStyleBlock(nullptr);
+        VESStyle s = parseStyleBlock();
         consume(TokenType::SemiColon, "Expected ';'");
 
         auto node = std::make_shared<TextNode>(varName, x, y, content, binding, s);
+        environment[varName] = node;
+        return node;
+    }
+    std::shared_ptr<ASTNode> parseIconDeclaration() {
+        consume(TokenType::Identifier, "Expected 'Icon'");
+        std::string varName = consume(TokenType::Identifier, "Expected id").value;
+        consume(TokenType::Equals, "Expected '='");
+        consume(TokenType::New, "Expected 'new'");
+        consume(TokenType::Identifier, "Expected 'Icon'");
+        consume(TokenType::LParen, "Expected '('");
+
+        float x = std::stof(consume(TokenType::Number, "Expected X").value); consume(TokenType::Comma, ",");
+        float y = std::stof(consume(TokenType::Number, "Expected Y").value); consume(TokenType::Comma, ",");
+        float w = std::stof(consume(TokenType::Number, "Expected Width").value); consume(TokenType::Comma, ",");
+        float h = std::stof(consume(TokenType::Number, "Expected Height").value); consume(TokenType::Comma, ",");
+        
+        std::string path = consume(TokenType::String, "Expected filepath").value;
+        consume(TokenType::RParen, "Expected ')'");
+
+        VESStyle s = parseStyleBlock();
+        consume(TokenType::SemiColon, "Expected ';'");
+
+        auto node = std::make_shared<IconNode>(varName, x, y, w, h, path, s);
         environment[varName] = node;
         return node;
     }
@@ -187,6 +197,9 @@ public:
             }
             else if (current().type == TokenType::Identifier && current().value == "Circle") {
                 nodes.push_back(parseCircleDeclaration());
+            }
+            else if (current().type == TokenType::Identifier && current().value == "Icon") {
+                nodes.push_back(parseIconDeclaration());
             }
             else {
                 pos++; 

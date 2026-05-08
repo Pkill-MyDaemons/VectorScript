@@ -6,6 +6,7 @@
 #include "PageManager.h"
 #include "LinuxRenderer.h"
 #include "MacRenderer.h"
+#include "libs/utils.h"
 
 int main() {
     PageManager pages;
@@ -54,8 +55,7 @@ int main() {
                     else if (!callback.empty()) {
                         bridge.execute(callback, { (*it)->getId() });
                     }
-                    
-                    break; // Stop checking after we hit the top element
+                
                 }
             }
         }
